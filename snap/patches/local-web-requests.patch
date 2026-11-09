@@ -1,0 +1,111 @@
+--- a/LinuxGUI/Ventoy2Disk/Web/ventoy_http.c
++++ b/LinuxGUI/Ventoy2Disk/Web/ventoy_http.c
+@@ -1514,55 +1514,63 @@
+ 
+ static int ventoy_request_handler(struct mg_connection *conn)
+ {
+-    int post_data_len;
+-    int post_buf_len;
++    int received;
++    int total = 0;
+     VTOY_JSON *json = NULL;
+-    char *post_data_buf = NULL;
+-    const struct mg_request_info *ri = NULL;
+-    char stack_buf[512];
+-    
+-    ri = mg_get_request_info(conn);    
+-
+-    if (strcmp(ri->uri, "/vtoy/json") == 0)
+-    {
+-        if (ri->content_length > 500)
+-        {
+-            post_data_buf = malloc(ri->content_length + 4);
+-            post_buf_len  = ri->content_length + 1;
+-        }
+-        else
+-        {
+-            post_data_buf = stack_buf;
+-            post_buf_len = sizeof(stack_buf);
+-        }
+-        
+-        post_data_len = mg_read(conn, post_data_buf, post_buf_len);
+-        post_data_buf[post_data_len] = 0;
+-
+-        json = vtoy_json_create();
+-        if (JSON_SUCCESS == vtoy_json_parse(json, post_data_buf))
+-        {
+-            pthread_mutex_lock(&g_api_mutex);
+-            ventoy_json_handler(conn, json->pstChild);
+-            pthread_mutex_unlock(&g_api_mutex);
+-        }
+-        else
+-        {
+-            ventoy_json_result(conn, VTOY_JSON_INVALID_RET);
+-        }
+-
+-        vtoy_json_destroy(json);
+-
+-        if (post_data_buf != stack_buf)
+-        {
+-            free(post_data_buf);
+-        }
+-        return 1;
++    char post_data[4097];
++    const char *host = mg_get_header(conn, "Host");
++    const struct mg_request_info *ri = mg_get_request_info(conn);
++
++    if (!host || (strncmp(host, "127.0.0.1", 9) && strncmp(host, "localhost", 9)) ||
++        (host[9] && (host[9] != ':' || !host[10] || strlen(host + 10) > 5 ||
++                    strspn(host + 10, "0123456789") != strlen(host + 10))))
++    {
++        mg_printf(conn, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
++        return 403;
++    }
++
++    if (strcmp(ri->uri, "/vtoy/json") != 0)
++    {
++        return 0;
++    }
++
++    if (ri->content_length <= 0 || ri->content_length >= sizeof(post_data))
++    {
++        mg_printf(conn, "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
++        return 413;
++    }
++
++    while (total < ri->content_length)
++    {
++        received = mg_read(conn, post_data + total, ri->content_length - total);
++        if (received <= 0)
++        {
++            mg_printf(conn, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
++            return 400;
++        }
++        total += received;
++    }
++    post_data[total] = 0;
++
++    json = vtoy_json_create();
++    if (!json)
++    {
++        mg_printf(conn, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
++        return 500;
++    }
++    if (JSON_SUCCESS == vtoy_json_parse(json, post_data))
++    {
++        pthread_mutex_lock(&g_api_mutex);
++        ventoy_json_handler(conn, json->pstChild);
++        pthread_mutex_unlock(&g_api_mutex);
+     }
+     else
+     {
+-        return 0;
+-    }
++        ventoy_json_result(conn, VTOY_JSON_INVALID_RET);
++    }
++
++    vtoy_json_destroy(json);
++    return 1;
+ }
+ 
+ int ventoy_http_start(const char *ip, const char *port)

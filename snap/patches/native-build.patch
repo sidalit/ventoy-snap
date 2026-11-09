@@ -1,0 +1,29 @@
+--- a/LinuxGUI/build.sh
++++ b/LinuxGUI/build.sh
+@@ -1,4 +1,5 @@
+ #!/bin/bash
++set -e
+ 
+ build_func() {    
+     libsuffix=$2
+@@ -58,9 +59,4 @@
+     cp -a V2D$libsuffix ../INSTALL/tool/$toolDir/V2DServer
+ }
+ 
+-build_func "gcc" '64' 'x86_64'
+-build_func "gcc -m32" '32' 'i386'
+-build_func "aarch64-linux-gnu-gcc" 'aa64' 'aarch64'
+-build_func "mips-linux-gnu-gcc -mips64r2 -mabi=64" 'm64e' 'mips64el'
+-
+-
++build_func gcc native "$(uname -m)"
+--- a/vtoycli/fat_io_lib/release/fat_filelib.c
++++ b/vtoycli/fat_io_lib/release/fat_filelib.c
+@@ -39,6 +39,7 @@
+ #include "fat_string.h"
+ #include "fat_filelib.h"
+ #include "fat_cache.h"
++#include "fat_format.h"
+ 
+ //-----------------------------------------------------------------------------
+ // Locals

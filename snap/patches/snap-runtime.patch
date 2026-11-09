@@ -1,0 +1,339 @@
+--- a/INSTALL/tool/ventoy_lib.sh
++++ b/INSTALL/tool/ventoy_lib.sh
+@@ -102,12 +102,7 @@
+ }
+ 
+ check_umount_disk() {
+-    DiskOrPart="$1"
+-    grep "^${DiskOrPart}" /proc/mounts | while read mtline; do
+-        mtpnt=$(echo $mtline | awk '{print $2}')
+-        vtdebug "Trying to umount $mtpnt ..."
+-        umount $mtpnt >/dev/null 2>&1
+-    done
++    "$SNAP/bin/ventoy-check-device" "$1" || exit 1
+ }
+ 
+ get_ventoy_version_from_cfg() {
+@@ -228,17 +223,15 @@
+     if ls -l $vPART1 2>/dev/null | grep -q '^b'; then
+         echo "$vPART1 exist OK"
+     else
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${vPART1#/dev/}/dev)        
+-        echo "mknod -m 0660 $vPART1 b $MajorMinor ..."
+-        mknod -m 0660 $vPART1 b $MajorMinor
++        vterr "$vPART1 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+     
+     if ls -l $vPART2 2>/dev/null | grep -q '^b'; then
+         echo "$vPART2 exist OK"
+     else
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${vPART2#/dev/}/dev)        
+-        echo "mknod -m 0660 $vPART2 b $MajorMinor ..."
+-        mknod -m 0660 $vPART2 b $MajorMinor        
++        vterr "$vPART2 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+ 
+     if ls -l $vPART1 2>/dev/null | grep -q '^b'; then
+@@ -286,16 +279,6 @@
+ 
+     vtdebug "part1_start_sector=$part1_start_sector  part1_end_sector=$part1_end_sector"
+     vtdebug "part2_start_sector=$part2_start_sector  part2_end_sector=$part2_end_sector"
+-
+-    if [ -e $PART1 ]; then
+-        echo "delete $PART1"
+-        rm -f $PART1
+-    fi
+-
+-    if [ -e $PART2 ]; then
+-        echo "delete $PART2"
+-        rm -f $PART2
+-    fi
+ 
+     echo ""
+     echo "Create partitions on $DISK by $PARTTOOL in MBR style ..."
+@@ -339,8 +322,7 @@
+ EOF
+     fi
+    
+-    udevadm trigger --name-match=$DISK >/dev/null 2>&1
+-    partprobe >/dev/null 2>&1
++    partprobe "$DISK" >/dev/null 2>&1
+     partx -u $DISK >/dev/null 2>&1
+     sleep 3
+     echo "Done"
+@@ -357,15 +339,13 @@
+     done
+ 
+     if ! [ -b $PART1 ]; then
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${PART1#/dev/}/dev)        
+-        echo "mknod -m 0660 $PART1 b $MajorMinor ..."
+-        mknod -m 0660 $PART1 b $MajorMinor
++        vterr "$PART1 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+     
+     if ! [ -b $PART2 ]; then
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${PART2#/dev/}/dev)        
+-        echo "mknod -m 0660 $PART2 b $MajorMinor ..."
+-        mknod -m 0660 $PART2 b $MajorMinor        
++        vterr "$PART2 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+ 
+     if [ -b $PART1 -a -b $PART2 ]; then
+@@ -424,16 +404,6 @@
+ 
+     vtdebug "part1_start_sector=$part1_start_sector  part1_end_sector=$part1_end_sector"
+     vtdebug "part2_start_sector=$part2_start_sector  part2_end_sector=$part2_end_sector"
+-
+-    if [ -e $PART1 ]; then
+-        echo "delete $PART1"
+-        rm -f $PART1
+-    fi
+-
+-    if [ -e $PART2 ]; then
+-        echo "delete $PART2"
+-        rm -f $PART2
+-    fi
+ 
+     echo ""
+     echo "Create partitions on $DISK by $PARTTOOL in GPT style ..."
+@@ -457,8 +427,7 @@
+     vtoycli gpt -f $DISK
+     sync
+ 
+-    udevadm trigger --name-match=$DISK >/dev/null 2>&1
+-    partprobe >/dev/null 2>&1
++    partprobe "$DISK" >/dev/null 2>&1
+     partx -u $DISK >/dev/null 2>&1
+     sleep 3
+     echo "Done"
+@@ -474,15 +443,13 @@
+     done
+ 
+     if ! [ -b $PART1 ]; then
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${PART1#/dev/}/dev)        
+-        echo "mknod -m 0660 $PART1 b $MajorMinor ..."
+-        mknod -m 0660 $PART1 b $MajorMinor
++        vterr "$PART1 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+     
+     if ! [ -b $PART2 ]; then
+-        MajorMinor=$(sed "s/:/ /" /sys/class/block/${PART2#/dev/}/dev)        
+-        echo "mknod -m 0660 $PART2 b $MajorMinor ..."
+-        mknod -m 0660 $PART2 b $MajorMinor        
++        vterr "$PART2 is unavailable. Reconnect the disk and retry."
++        exit 1
+     fi
+ 
+     if [ -b $PART1 -a -b $PART2 ]; then
+--- a/INSTALL/tool/VentoyWorker.sh
++++ b/INSTALL/tool/VentoyWorker.sh
+@@ -137,19 +137,6 @@
+ #check mountpoint
+ check_umount_disk "$DISK"
+ 
+-if grep "$DISK" /proc/mounts; then
+-    vterr "$DISK is already mounted, please umount it first!"
+-    exit 1
+-fi
+-
+-#check swap partition
+-if swapon --help 2>&1 | grep -q '^ -s,'; then
+-    if swapon -s | grep -q "^${DISK}[0-9]"; then
+-        vterr "$DISK is used as swap, please swapoff it first!"
+-        exit 1
+-    fi
+-fi
+-
+ #check access
+ if dd if="$DISK" of=/dev/null bs=1 count=1 >/dev/null 2>&1; then
+     vtdebug "root permission check ok ..."
+@@ -160,18 +147,6 @@
+ fi
+ 
+ 
+-#check tmp_mnt directory
+-if [ -d ./tmp_mnt ]; then
+-    vtdebug "There is a tmp_mnt directory, now delete it."
+-    umount ./tmp_mnt >/dev/null 2>&1
+-    rm -rf ./tmp_mnt
+-    if [ -d ./tmp_mnt ]; then
+-        vterr "tmp_mnt directory exists, please delete it first."
+-        exit 1
+-    fi
+-fi
+-
+-
+ if [ "$MODE" = "install" -a -z "$NONDESTRUCTIVE" ]; then
+     vtdebug "install Ventoy ..."
+ 
+@@ -314,9 +289,11 @@
+     wait_and_create_part ${PART1} ${PART2}    
+     if [ -b ${PART1} ]; then
+         vtinfo "Format partition 1 ${PART1} ..."
++        check_umount_disk "$DISK"
+         mkexfatfs -n "$VTNEW_LABEL" -s $cluster_sectors ${PART1}
+         if [ $? -ne 0 ]; then
+             echo "mkexfatfs failed, now retry..."
++            check_umount_disk "$DISK"
+             mkexfatfs -n "$VTNEW_LABEL" -s $cluster_sectors ${PART1}
+             if [ $? -ne 0 ]; then
+                 echo "######### mkexfatfs failed, exit ########"
+--- a/LinuxGUI/Ventoy2Disk/Core/ventoy_util.c
++++ b/LinuxGUI/Ventoy2Disk/Core/ventoy_util.c
+@@ -30,6 +30,8 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/mount.h>
++#include <sys/wait.h>
++#include <limits.h>
+ #include <linux/fs.h>
+ #include <dirent.h>
+ #include <time.h>
+@@ -137,107 +139,46 @@
+ 
+ int ventoy_is_disk_mounted(const char *devpath)
+ {
++    int status;
+     int len;
+-    int mount = 0;
+-    char line[512];
+-    FILE *fp = NULL;
+-
+-    fp = fopen("/proc/mounts", "r");
+-    if (!fp)
+-    {
+-        return 0;
+-    }
+-
+-    len = (int)strlen(devpath);
+-    while (fgets(line, sizeof(line), fp))
+-    {
+-        if (strncmp(line, devpath, len) == 0)
+-        {
+-            mount = 1;
+-            vdebug("%s mounted <%s>\n", devpath, line);
+-            goto end;
+-        }
+-    }
+-
+-end:
+-    fclose(fp);
+-    return mount;
+-}
+-
+-static int ventoy_mount_path_escape(char *src, char *dst, int len)
+-{
+-    int i = 0;
+-    int n = 0;
+-    
+-    dst[len - 1] = 0;
+-
+-    for (i = 0; i < len - 1; i++)
+-    {
+-        if (src[i] == '\\' && src[i + 1] == '0' && src[i + 2] == '4' && src[i + 3] == '0')
+-        {
+-            dst[n++] = ' ';
+-            i += 3;
+-        }
+-        else
+-        {
+-            dst[n++] = src[i];
+-        }
+-    
+-        if (src[i] == 0)
+-        {
+-            break;
+-        }
+-    }
+-
+-    return 0;
++    pid_t child;
++    pid_t result;
++    char helper[PATH_MAX];
++    const char *snap = getenv("SNAP");
++
++    if (!snap)
++    {
++        return 1;
++    }
++    len = snprintf(helper, sizeof(helper), "%s/bin/ventoy-check-device", snap);
++    if (len < 0 || len >= sizeof(helper))
++    {
++        return 1;
++    }
++
++    child = fork();
++    if (child < 0)
++    {
++        return 1;
++    }
++    if (child == 0)
++    {
++        execl(helper, helper, devpath, (char *)NULL);
++        _exit(127);
++    }
++
++    do
++    {
++        result = waitpid(child, &status, 0);
++    } while (result < 0 && errno == EINTR);
++
++    return result < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0;
+ }
+ 
+ int ventoy_try_umount_disk(const char *devpath)
+ {
+-    int rc;
+-    int len;
+-    char line[1024];
+-    char mntpt[1024];
+-    char *pos1 = NULL;
+-    char *pos2 = NULL;
+-    FILE *fp = NULL;
+-
+-    fp = fopen("/proc/mounts", "r");
+-    if (!fp)
+-    {
+-        return 0;
+-    }
+-
+-    len = (int)strlen(devpath);
+-    while (fgets(line, sizeof(line), fp))
+-    {
+-        if (strncmp(line, devpath, len) == 0)
+-        {
+-            pos1 = strchr(line, ' ');
+-            if (pos1)
+-            {
+-                pos2 = strchr(pos1 + 1, ' ');
+-                if (pos2)
+-                {
+-                    *pos2 = 0;
+-                }
+-
+-                ventoy_mount_path_escape(pos1 + 1, mntpt, sizeof(mntpt));                
+-                rc = umount(mntpt);
+-                if (rc)
+-                {
+-                    vdebug("umount <%s> <%s> [ failed ] error:%d\n", devpath, mntpt, errno);                                        
+-                }
+-                else
+-                {
+-                    vdebug("umount <%s> <%s> [ success ]\n", devpath, mntpt);
+-                }
+-            }
+-        }
+-    }
+-
+-    fclose(fp);
+-    return 0;
++    vlog("Refusing to write %s: unmount its filesystems and disable its swap on the host first.\n", devpath);
++    return 1;
+ }
+ 
+ int ventoy_read_file_to_buf(const char *FileName, int ExtLen, void **Bufer, int *BufLen)

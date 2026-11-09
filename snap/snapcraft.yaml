@@ -1,0 +1,133 @@
+name: ventoy
+base: core26
+version: '1.1.18'
+title: Ventoy
+icon: snap/gui/ventoy.png
+summary: Create and update multiboot USB drives
+description: |
+  Ventoy prepares a USB drive to boot ISO, WIM, IMG, VHD(x) and EFI files.
+  Copy images onto the drive and select one from the boot menu.
+
+  This snap provides the command-line installer and Ventoy's official local
+  Web UI. Run sudo ventoy.web and open http://127.0.0.1:24680.
+  Unmount the target drive before installing or updating Ventoy.
+license: GPL-3.0-or-later
+grade: stable
+confinement: strict
+assumes: [snapd2.71]
+website: https://www.ventoy.net
+source-code:
+  - https://github.com/ventoy/Ventoy
+  - https://github.com/sidalit/ventoy-snap
+issues:
+  - https://github.com/ventoy/Ventoy/issues
+  - https://github.com/sidalit/ventoy-snap/issues
+contact: https://github.com/sidalit/ventoy-snap/issues
+
+platforms:
+  amd64:
+  arm64:
+
+plugs:
+  block-devices:
+    allow-partitions: true
+
+apps:
+  ventoy:
+    command: bin/ventoy-launch cli
+    plugs:
+      - block-devices
+      - mount-observe
+  web:
+    command: bin/ventoy-launch web
+    plugs:
+      - block-devices
+      - mount-observe
+      - network-bind
+
+parts:
+  ventoy:
+    plugin: nil
+    source: https://github.com/ventoy/Ventoy.git
+    source-tag: v$SNAPCRAFT_PROJECT_VERSION
+    source-depth: 1
+    build-packages:
+      - dos2unix
+      - gcc
+      - libc6-dev
+      - patch
+    stage-packages:
+      - parted
+      - xz-utils
+      - bsdextrautils
+      - ntfs-3g
+    override-pull: |
+      craftctl default
+      patch -p1 < "$CRAFT_PROJECT_DIR/snap/patches/native-build.patch"
+      patch -p1 < "$CRAFT_PROJECT_DIR/snap/patches/snap-runtime.patch"
+      patch -p1 < "$CRAFT_PROJECT_DIR/snap/patches/local-web-requests.patch"
+    override-build: |
+      (cd LinuxGUI && bash language.sh && bash build.sh)
+      tools="$CRAFT_PART_INSTALL/usr/lib/ventoy/tool"
+      install -Dm755 "INSTALL/tool/$(uname -m)/V2DServer" "$tools/V2DServer"
+      (
+        cd vtoycli
+        gcc -std=gnu99 -Os -D_FILE_OFFSET_BITS=64 -Ifat_io_lib/release \
+          vtoycli.c vtoyfat.c vtoygpt.c crc32.c partresize.c \
+          fat_io_lib/release/fat*.c -o "$tools/vtoycli"
+      )
+      strip "$tools/vtoycli"
+      install -m644 INSTALL/tool/VentoyWorker.sh INSTALL/tool/ventoy_lib.sh "$tools/"
+      cp -a LinuxGUI/WebUI "$CRAFT_PART_INSTALL/usr/lib/ventoy/"
+      install -Dm644 COPYING "$CRAFT_PART_INSTALL/usr/share/doc/ventoy/COPYING"
+      cp -a License "$CRAFT_PART_INSTALL/usr/share/doc/ventoy/"
+    stage:
+      - usr/lib/ventoy
+      - usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libparted.so*
+      - usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libntfs-3g.so*
+      - usr/share/doc
+      - usr/bin/hexdump
+      - usr/bin/ntfsfix
+      - usr/bin/xz
+      - usr/bin/xzcat
+      - usr/sbin/ntfsresize
+      - usr/sbin/parted
+      - usr/sbin/partprobe
+
+  boot-payload:
+    plugin: dump
+    source: https://github.com/ventoy/Ventoy/releases/download/v$SNAPCRAFT_PROJECT_VERSION/ventoy-$SNAPCRAFT_PROJECT_VERSION-linux.tar.gz
+    build-packages:
+      - curl
+      - jq
+      - xz-utils
+    override-pull: |
+      case "$SNAPCRAFT_PROJECT_VERSION" in
+        git-*)
+          release=$(curl -fsSL https://api.github.com/repos/ventoy/Ventoy/releases/latest | jq -er .tag_name)
+          archive="ventoy-${release#v}-linux.tar.gz"
+          url="https://github.com/ventoy/Ventoy/releases/download/$release"
+          download=$(mktemp -d)
+          trap 'rm -rf "$download"' EXIT
+          curl -fL "$url/$archive" -o "$download/$archive"
+          curl -fsSL "$url/sha256.txt" -o "$download/sha256.txt"
+          (cd "$download" && sha256sum --check --ignore-missing sha256.txt)
+          mkdir -p "$CRAFT_PART_SRC"
+          tar -xzf "$download/$archive" --strip-components=1 -C "$CRAFT_PART_SRC"
+          ;;
+        *) craftctl default ;;
+      esac
+    override-build: |
+      craftctl default
+      xz -dc "tool/$(uname -m)/mkexfatfs.xz" > "$CRAFT_PART_INSTALL/tool/mkexfatfs"
+      chmod 755 "$CRAFT_PART_INSTALL/tool/mkexfatfs"
+    organize:
+      boot: usr/lib/ventoy/boot
+      ventoy: usr/lib/ventoy/ventoy
+      tool/mkexfatfs: usr/lib/ventoy/tool/mkexfatfs
+    stage:
+      - usr/lib/ventoy
+
+  scripts:
+    plugin: dump
+    source: snap/local

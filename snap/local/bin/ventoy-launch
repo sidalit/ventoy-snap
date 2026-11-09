@@ -1,0 +1,70 @@
+#!/bin/bash
+set -euo pipefail
+
+mode=$1
+shift
+payload="$SNAP/usr/lib/ventoy"
+
+if [ "$mode" = cli ]; then
+    case "${1:-}" in
+        -V|--version)
+            cat "$payload/ventoy/version"
+            exit 0
+            ;;
+        ''|-h|--help)
+            cd "$payload"
+            exec bash ./tool/VentoyWorker.sh --help
+            ;;
+    esac
+else
+    port=24680
+    while getopts ':p:h' option; do
+        case "$option" in
+            p) port=$OPTARG ;;
+            h) echo 'Usage: sudo ventoy.web [-p PORT]'; exit 0 ;;
+            *) echo 'Usage: sudo ventoy.web [-p PORT]' >&2; exit 1 ;;
+        esac
+    done
+    shift "$((OPTIND - 1))"
+    if [ "$#" -ne 0 ] || [[ ! "$port" =~ ^[0-9]{1,5}$ ]] ||
+        (( 10#$port < 1 || 10#$port > 65535 )); then
+        echo 'Port must be between 1 and 65535.' >&2
+        exit 1
+    fi
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'Ventoy needs root access. Run this command with sudo.' >&2
+    exit 1
+fi
+
+for plug in block-devices mount-observe; do
+    if ! snapctl is-connected "$plug"; then
+        echo "Connect the interface first: sudo snap connect ventoy:$plug" >&2
+        exit 1
+    fi
+done
+
+umask 077
+exec 9>"$SNAP_COMMON/ventoy.lock"
+if ! flock --nonblock 9; then
+    echo 'Another Ventoy command is running. Close it before continuing.' >&2
+    exit 1
+fi
+
+mkdir -p "$SNAP_DATA/work"
+cd "$SNAP_DATA/work"
+for directory in boot ventoy tool WebUI; do
+    ln -sfn "$payload/$directory" "$directory"
+done
+
+export PATH="$SNAP/bin:$payload/tool:$SNAP/usr/sbin:$SNAP/usr/bin:$PATH"
+export TOOLDIR
+TOOLDIR=$(uname -m)
+
+if [ "$mode" = cli ]; then
+    exec bash ./tool/VentoyWorker.sh "$@"
+fi
+
+echo "Open http://127.0.0.1:$port in your browser. Press Ctrl+C to stop."
+exec ./tool/V2DServer 127.0.0.1 "$port"

@@ -1,0 +1,81 @@
+#!/bin/bash
+set -euo pipefail
+
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+[ "$#" -eq 1 ] && [ -b "$1" ] || fail 'Expected a block device.'
+
+devices=$(lsblk --noheadings --raw --output MAJ:MIN "$1") ||
+    fail "Cannot inspect $1 and its partitions."
+[ -n "$devices" ] || fail "Cannot identify $1."
+filesystems=$(lsblk --noheadings --raw --output FSTYPE "$1") ||
+    fail "Cannot inspect the filesystems on $1."
+while read -r filesystem; do
+    case "$filesystem" in
+        btrfs|bcachefs|zfs_member)
+            fail "$1 contains $filesystem. This snap cannot safely verify its host usage."
+            ;;
+    esac
+done <<< "$filesystems"
+
+# Use the host mount namespace, not the snap's private mount table.
+mountinfo=$(cat /proc/1/mountinfo) ||
+    fail 'Cannot read the host mount table; refusing to write.'
+[ -n "$mountinfo" ] || fail 'The host mount table is empty; refusing to write.'
+mounts=$(awk '{print $3}' <<< "$mountinfo")
+
+# FUSE block filesystems expose a synthetic device ID; resolve their source.
+mount_sources=$(awk '
+    $3 ~ /^0:/ {
+        for (i = 7; i <= NF; i++) {
+            if ($i != "-") continue
+            filesystem = $(i + 1)
+            source = $(i + 2)
+            if (filesystem == "fuseblk" || filesystem == "fuse.exfat" ||
+                filesystem == "fuse.ntfs-3g" || source ~ /^\/dev\//) {
+                if (source == "") exit 1
+                print source
+            }
+            break
+        }
+    }
+' <<< "$mountinfo") || fail 'Cannot identify host mount sources; refusing to write.'
+while IFS= read -r source; do
+    [ -n "$source" ] || continue
+    source=${source//\\040/ }
+    source=${source//\\011/$'\t'}
+    source=${source//\\012/$'\n'}
+    source=${source//\\134/\\}
+    [ -b "$source" ] || fail "Cannot resolve mounted block device $source; refusing to write."
+    mount_id=$(lsblk --nodeps --noheadings --raw --output MAJ:MIN "$source") ||
+        fail "Cannot identify mounted block device $source; refusing to write."
+    [ -n "$mount_id" ] || fail "Cannot identify mounted block device $source."
+    mounts="$mounts
+$mount_id"
+done <<< "$mount_sources"
+
+swaps=$(cat /proc/swaps) || fail 'Cannot read swap usage; refusing to write.'
+[ -n "$swaps" ] || fail 'Swap usage is unavailable; refusing to write.'
+
+while read -r device type rest; do
+    [ "$type" = partition ] || continue
+    swap_id=$(lsblk --nodeps --noheadings --raw --output MAJ:MIN "$device") ||
+        fail "Cannot identify swap device $device; refusing to write."
+    [ -n "$swap_id" ] || fail "Cannot identify swap device $device."
+    mounts="$mounts
+$swap_id"
+done <<< "$swaps"
+
+if ! printf '%s\n' "$mounts" | awk -v devices="$devices" '
+    BEGIN {
+        count = split(devices, entries, "\n")
+        for (i = 1; i <= count; i++) selected[entries[i]] = 1
+    }
+    $1 in selected { busy = 1 }
+    END { exit busy ? 1 : 0 }
+'; then
+    fail "$1 is mounted or used as swap. Unmount its filesystems and disable its swap on the host first."
+fi

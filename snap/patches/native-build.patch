@@ -27,3 +27,14 @@
  
  //-----------------------------------------------------------------------------
  // Locals
+--- a/LANGUAGES/check.sh
++++ b/LANGUAGES/check.sh
+@@ -6,7 +6,7 @@
+     exit 1
+ fi
+ 
+-gcc -DFOR_VTOY_JSON_CHECK $VTOY_PATH/Ventoy2Disk/Ventoy2Disk/VentoyJson.c -I $VTOY_PATH/Ventoy2Disk/Ventoy2Disk/ -o checkjson
++gcc -fsigned-char -DFOR_VTOY_JSON_CHECK $VTOY_PATH/Ventoy2Disk/Ventoy2Disk/VentoyJson.c -I $VTOY_PATH/Ventoy2Disk/Ventoy2Disk/ -o checkjson
+ 
+ RET=0
+ 

@@ -112,8 +112,10 @@ parts:
           curl -fL "$url/$archive" -o "$download/$archive"
           curl -fsSL "$url/sha256.txt" -o "$download/sha256.txt"
           (cd "$download" && sha256sum --check --ignore-missing sha256.txt)
-          mkdir -p "$CRAFT_PART_SRC"
-          tar -xzf "$download/$archive" --strip-components=1 -C "$CRAFT_PART_SRC"
+          # The archive stores its files under ./ventoy-<version>/.
+          mkdir -p "$download/root" "$CRAFT_PART_SRC"
+          tar -xzf "$download/$archive" -C "$download/root"
+          cp -a "$download/root/ventoy-${release#v}/." "$CRAFT_PART_SRC/"
           ;;
         *) craftctl default ;;
       esac

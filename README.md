@@ -47,10 +47,8 @@ There are no `snap set` options. The Web UI listens only on localhost and runs o
 
 ## Limitations
 
-- Requires snapd 2.71 or newer. Raw disk access needs Snap Store approval and the interface connections above.
 - Includes the CLI and official Web UI; the native GTK/Qt application and Plugson are not included.
 - Mounted drives, active swap, and targets containing Btrfs, bcachefs or ZFS are refused.
-- The Web UI trusts local users. Close it after use and avoid running other disk tools at the same time.
 
 ## Build
 
@@ -60,8 +58,6 @@ cd ventoy-snap
 sudo snap install snapcraft --classic
 snapcraft pack
 ```
-
-The Linux installer is built from source with Ventoy's released boot payload. Release builds use the matching payload; HEAD builds use the latest released payload, retaining its bootloader version.
 
 ## Support
 

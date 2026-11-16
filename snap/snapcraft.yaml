@@ -99,12 +99,17 @@ parts:
     source: https://github.com/ventoy/Ventoy/releases/download/v$SNAPCRAFT_PROJECT_VERSION/ventoy-$SNAPCRAFT_PROJECT_VERSION-linux.tar.gz
     build-packages:
       - curl
-      - jq
       - xz-utils
     override-pull: |
       case "$SNAPCRAFT_PROJECT_VERSION" in
         git-*)
-          release=$(curl -fsSL https://api.github.com/repos/ventoy/Ventoy/releases/latest | jq -er .tag_name)
+          # The web redirect avoids the API rate limit of shared CI runners.
+          latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/ventoy/Ventoy/releases/latest)
+          release=${latest##*/}
+          case "$release" in
+            v[0-9]*) ;;
+            *) echo "No release tag in $latest" >&2; exit 1 ;;
+          esac
           archive="ventoy-${release#v}-linux.tar.gz"
           url="https://github.com/ventoy/Ventoy/releases/download/$release"
           download=$(mktemp -d)
